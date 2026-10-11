@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>cREXX in WebAssembly</title>
+<style>
+:root{--bg:#f6f5f1;--panel:#fff;--ink:#1d1d1b;--mute:#6b6a64;--line:#dcdad2;--accent:#1f6f5c;--term:#10140f;--termink:#b9f5c8}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#15161a;--panel:#1d1f25;--ink:#e8e6df;--mute:#9a988f;--line:#33353d;--accent:#4fc3a1;--term:#0b0d0a;--termink:#b9f5c8}}
+:root[data-theme="dark"]{--bg:#15161a;--panel:#1d1f25;--ink:#e8e6df;--mute:#9a988f;--line:#33353d;--accent:#4fc3a1;--term:#0b0d0a;--termink:#b9f5c8}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding:24px 16px 40px}
+h1{font-size:22px;margin:0 0 4px}
+p.sub{margin:0 0 18px;color:var(--mute)}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
+select,button{font:inherit;padding:7px 12px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--ink)}
+button.run{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600;cursor:pointer}
+button.run:disabled{opacity:.5;cursor:wait}
+.stat{margin-left:auto;color:var(--mute);font-size:13px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:760px){.grid{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;display:flex;flex-direction:column}
+.card h2{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);margin:0;padding:8px 12px;border-bottom:1px solid var(--line)}
+textarea,pre{margin:0;border:0;width:100%;font:13px/1.45 ui-monospace,Menlo,Consolas,monospace;padding:12px;resize:vertical}
+textarea{background:var(--panel);color:var(--ink);min-height:300px;outline:none}
+textarea.in{min-height:70px;border-top:1px solid var(--line)}
+pre{background:var(--term);color:var(--termink);min-height:300px;white-space:pre-wrap;overflow:auto;flex:1}
+pre .err{color:#ff9d8a}
+.foot{margin-top:16px;color:var(--mute);font-size:13px}
+code{font-family:ui-monospace,Menlo,monospace}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>xBase on cREXX, in WebAssembly</h1>
+  <p class="sub">The cREXX virtual machine compiled to WASM runs an xBase interpreter that is itself written in cREXX. Everything below executes in this page, with no server.</p>
+  <div class="bar">
+    <label for="sel">Example</label>
+    <select id="sel"></select>
+    <button class="run" id="run" disabled>Loading…</button>
+    <span class="stat" id="stat"></span>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <h2>Program (.prg)</h2>
+      <textarea id="src" spellcheck="false"></textarea>
+      <h2 style="border-top:1px solid var(--line)">Standard input</h2>
+      <textarea id="inp" class="in" spellcheck="false" placeholder="Lines fed to ACCEPT / INPUT"></textarea>
+    </div>
+    <div class="card">
+      <h2>Output</h2>
+      <pre id="out"></pre>
+    </div>
+  </div>
+  <p class="foot">rxvm.wasm is 1.8 MB (built with WASI&nbsp;SDK 24). The xBase interpreter is a <code>.rxbin</code> loaded from an in-memory file system; files such as DBF tables created by a program live only in that memory.</p>
+</div>
+<script>/*SHIM*/</script>
+<script>
+/*ASSETS*/
+const $=id=>document.getElementById(id);
+async function unb64(s){
+  const bin=Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+  const ds=new DecompressionStream('gzip');
+  const r=new Response(new Blob([bin]).stream().pipeThrough(ds));
+  return new Uint8Array(await r.arrayBuffer());
+}
+let mod, libs={};
+const enc=new TextEncoder(), dec=new TextDecoder();
+PROGS.forEach((p,i)=>{const o=document.createElement('option');o.value=i;o.textContent=p.name;$('sel').appendChild(o)});
+function pick(){const p=PROGS[$('sel').value];$('src').value=p.src;$('inp').value=p.stdin;$('out').textContent=''}
+$('sel').onchange=pick; pick();
+(async()=>{
+  const t=performance.now();
+  mod=await WebAssembly.compile(await unb64(ASSETS.wasm));
+  for(const m of ['xbase','library','classlib']) libs[m]=await unb64(ASSETS[m]);
+  $('run').disabled=false;$('run').textContent='Run ▶';
+  $('stat').textContent='VM ready in '+Math.round(performance.now()-t)+' ms';
+  if(location.hash==='#autorun') run();
+})();
+function run(){
+  $('run').disabled=true;$('out').textContent='';
+  setTimeout(()=>{
+    const {WASI,File,PreopenDirectory,ConsoleStdout,OpenFile}=window.__wasi;
+    const files=new Map();
+    for(const m in libs) files.set(m+'.rxbin',new File(libs[m]));
+    files.set('prog.prg',new File(enc.encode($('src').value)));
+    let out='';
+    const w=t=>{out+=t; $('out').textContent=out;};
+    const fds=[
+      new OpenFile(new File(enc.encode($('inp').value))),
+      ConsoleStdout.lineBuffered(l=>w(l+'\n')),
+      ConsoleStdout.lineBuffered(l=>w(l+'\n')),
+      new PreopenDirectory('/',files)
+    ];
+    const wasi=new WASI(['rxvm','xbase','-a','prog.prg'],[],fds);
+    const t0=performance.now();
+    let rc;
+    try{
+      const inst=new WebAssembly.Instance(mod,{wasi_snapshot_preview1:wasi.wasiImport});
+      rc=wasi.start(inst);
+    }catch(e){w('\n[vm error] '+e)}
+    $('stat').textContent='exit '+rc+' · '+Math.round(performance.now()-t0)+' ms';
+    $('run').disabled=false;
+  },20);
+}
+$('run').onclick=run;
+</script>
+</body>
+</html>

@@ -1,0 +1,139 @@
+<title>APL in WebAssembly</title>
+<style>
+/* Layout: toolbar over two panes (source and stdin on the left, session on the right). Tokens first. */
+:root{--bg:#f4f5f7;--panel:#fff;--ink:#16181d;--mute:#626874;--line:#d6d9e0;--accent:#2d4fd1;--term:#0e1220;--termink:#c9d6ff;--termdim:#7d8bb5;--err:#ff9d8a}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12141a;--panel:#1b1e27;--ink:#e6e8ee;--mute:#9aa0ae;--line:#323644;--accent:#8aa2ff;--term:#0a0c14;--termink:#c9d6ff;--termdim:#7d8bb5;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#12141a;--panel:#1b1e27;--ink:#e6e8ee;--mute:#9aa0ae;--line:#323644;--accent:#8aa2ff;--term:#0a0c14;--termink:#c9d6ff;--termdim:#7d8bb5;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding-block:24px 40px;padding-inline:16px}
+h1{font-size:22px;margin:0 0 4px}
+p.sub{margin:0 0 18px;color:var(--mute)}
+.tabs{display:flex;gap:4px;margin-bottom:12px;border-bottom:1px solid var(--line)}
+.tab{font:inherit;padding:8px 14px;border:0;border-bottom:2px solid transparent;background:none;color:var(--mute);cursor:pointer}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent);font-weight:600}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
+select,button.b,input.cmd{font:inherit;padding:7px 12px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--ink)}
+button.run{font:inherit;padding:7px 14px;border-radius:6px;background:var(--accent);color:var(--bg);border:1px solid var(--accent);font-weight:600;cursor:pointer}
+button:disabled{opacity:.5;cursor:wait}
+.stat{margin-left:auto;color:var(--mute);font-size:13px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+@media (max-width:760px){.grid{grid-template-columns:minmax(0,1fr)}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.card h2{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);margin:0;padding:8px 12px;border-bottom:1px solid var(--line)}
+textarea,pre{margin:0;border:0;width:100%;font:13px/1.45 ui-monospace,Menlo,Consolas,monospace;padding:12px;resize:vertical}
+textarea{background:var(--panel);color:var(--ink);min-height:300px;outline:none}
+textarea.in{min-height:70px;border-top:1px solid var(--line)}
+pre{background:var(--term);color:var(--termink);min-height:300px;white-space:pre-wrap;overflow:auto;flex:1}
+pre .q{color:var(--termdim)}
+.repl{display:flex;gap:8px;padding:8px 12px;background:var(--term)}
+.repl span{color:var(--termdim);font:13px ui-monospace,Menlo,monospace;padding-top:7px}
+input.cmd{flex:1;min-width:0;font:13px ui-monospace,Menlo,Consolas,monospace;background:var(--term);color:var(--termink);border-color:var(--termdim)}
+.hint{color:var(--mute);font-size:13px;margin:10px 0 0}
+.foot{margin-top:16px;color:var(--mute);font-size:13px}
+code{font-family:ui-monospace,Menlo,monospace}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+[hidden]{display:none!important}
+</style>
+<div class="wrap">
+  <h1>APL in WebAssembly</h1>
+  <p class="sub">A word-glyph APL interpreter written in portable C89, compiled to WASM. Glyphs are spelled as words: <code>iota</code>, <code>rho</code>, <code>reduce plus</code>. It runs in this page with no server.</p>
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" id="t-sess" aria-selected="true">Session</button>
+    <button class="tab" role="tab" id="t-scr" aria-selected="false">Script</button>
+  </div>
+
+  <section id="p-sess">
+    <div class="card">
+      <h2>Workspace</h2>
+      <pre id="sout" style="min-height:340px"></pre>
+      <form class="repl" id="rform"><span>&nbsp;&nbsp;&nbsp;</span><input class="cmd" id="cmd" autocomplete="off" spellcheck="false" aria-label="APL expression" placeholder="try:  iota 10   or   (iota 5) times 2" disabled></form>
+    </div>
+    <p class="hint">Variables and functions persist for the session because each line replays the history on a fresh VM (fast for a session this size). <code>?</code> and <code>roll</code> reseed on every replay, so keep random numbers in the line that uses them. <span id="sstat"></span></p>
+  </section>
+
+  <section id="p-scr" hidden>
+    <div class="bar">
+      <label for="sel">Example</label>
+      <select id="sel"></select>
+      <button class="run" id="run" disabled>Loading…</button>
+      <span class="stat" id="stat"></span>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h2>Script (.apl)</h2>
+        <textarea id="src" spellcheck="false"></textarea>
+        <h2 style="border-top:1px solid var(--line)">Standard input</h2>
+        <textarea id="inp" class="in" spellcheck="false" placeholder="Lines read by the quad [] input"></textarea>
+      </div>
+      <div class="card">
+        <h2>Output</h2>
+        <pre id="out"></pre>
+      </div>
+    </div>
+  </section>
+  <p class="foot">apl.wasm is 600 KB (WASI SDK 24). Errors recover through setjmp/longjmp, which the page maps onto WebAssembly exceptions. Source: mikebeer/apl and mikebeer/wasm.</p>
+</div>
+<script>/*SHIM*/</script>
+<script>
+/*ASSETS*/
+const $=id=>document.getElementById(id);
+async function unb64(s){const bin=Uint8Array.from(atob(s),c=>c.charCodeAt(0));return new Uint8Array(await new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer())}
+const enc=new TextEncoder();
+let mod=null;
+function makeEnv(getExports){
+  let id=0,ret=0;const H=()=>new Int32Array(getExports().memory.buffer);
+  function save(env,label,table,size){let h=H();id++;h[env>>2]=id;
+    for(let i=0;i<size;i++){if(h[(table>>2)+i*2]===0){h[(table>>2)+i*2]=id;h[(table>>2)+i*2+1]=label;h[(table>>2)+i*2+2]=0;ret=size;return table}}
+    const n=size*2;table=getExports().realloc(table,8*(n+1));h=H();for(let i=size*2;i<n*2+2;i++)h[(table>>2)+i]=0;table=save(env,label,table,n);ret=n;return table}
+  return{env:{saveSetjmp:save,testSetjmp:(id2,table,size)=>{const h=H();for(let i=0;i<size;i++){const c=h[(table>>2)+i*2];if(c===0)break;if(c===id2)return h[(table>>2)+i*2+1]}return 0},getTempRet0:()=>ret}}
+}
+function runApl(files,stdin,args){
+  const {WASI,File,PreopenDirectory,ConsoleStdout,OpenFile}=window.__wasi;
+  const map=new Map();for(const k in files)map.set(k,new File(enc.encode(files[k])));
+  let out='';const w=l=>{out+=l+'\n'};
+  const wasi=new WASI(['apl',...args],[],[new OpenFile(new File(enc.encode(stdin))),ConsoleStdout.lineBuffered(w),ConsoleStdout.lineBuffered(w),new PreopenDirectory('/',map)]);
+  let ex;const imp={wasi_snapshot_preview1:wasi.wasiImport,...makeEnv(()=>ex)};
+  const inst=new WebAssembly.Instance(mod,imp);ex=inst.exports;
+  let rc;const t0=performance.now();
+  try{rc=wasi.start(inst)}catch(e){out+='\n[vm error] '+e}
+  return{out,rc,ms:Math.round(performance.now()-t0)};
+}
+/* tabs */
+function tab(which){const s=which==='sess';$('p-sess').hidden=!s;$('p-scr').hidden=s;
+  $('t-sess').setAttribute('aria-selected',s);$('t-scr').setAttribute('aria-selected',!s)}
+$('t-sess').onclick=()=>tab('sess');$('t-scr').onclick=()=>tab('scr');
+/* script tab */
+PROGS.forEach((p,i)=>{const o=document.createElement('option');o.value=i;o.textContent=p.name;$('sel').appendChild(o)});
+function pick(){const p=PROGS[$('sel').value];$('src').value=p.src;$('inp').value=p.stdin;$('out').textContent=''}
+$('sel').onchange=pick;$('sel').value=PROGS.findIndex(p=>p.name==='life.apl');pick();
+function runScript(){
+  $('run').disabled=true;$('out').textContent='';
+  setTimeout(()=>{const r=runApl({'prog.apl':$('src').value},$('inp').value,['prog.apl']);
+    $('out').textContent=r.out;$('stat').textContent='exit '+r.rc+' · '+r.ms+' ms';$('run').disabled=false},20);
+}
+$('run').onclick=runScript;
+/* session tab: replay history, show only the newest line's result */
+const hist=[];const sout=$('sout');
+function addLine(text,cls){const d=document.createElement('div');if(cls)d.className=cls;d.textContent=text;sout.appendChild(d)}
+function evalLine(line){
+  hist.push(line);
+  const r=runApl({},hist.join('\n')+'\n',[]);
+  const parts=r.out.split('apl> ');
+  let res=(parts[hist.length]||'').replace(/\n+$/,'');
+  if(parts.length<=hist.length)res='';
+  addLine('      '+line,'q');
+  if(res)addLine(res);
+  $('sstat').textContent=r.ms+' ms';
+  sout.scrollTop=sout.scrollHeight;
+}
+$('rform').onsubmit=e=>{e.preventDefault();const v=$('cmd').value.trim();if(!v)return;$('cmd').value='';evalLine(v)};
+(async()=>{
+  const t=performance.now();
+  mod=await WebAssembly.compile(await unb64(ASSETS.wasm));
+  $('run').disabled=false;$('run').textContent='Run ▶';$('cmd').disabled=false;
+  $('stat').textContent='VM ready in '+Math.round(performance.now()-t)+' ms';
+  addLine('APL-in-C on WebAssembly. Type an expression, or )help','q');
+  for(const l of SEED)evalLine(l);
+})();
+</script>
