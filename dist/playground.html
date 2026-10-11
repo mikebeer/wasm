@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body>
+<title>WASM Playground</title>
+<style>
+/* Layout: language chips, then a toolbar over two panes (program + input | output + drawing). Tokens first. */
+:root{--bg:#f3f4f1;--panel:#fff;--ink:#181a17;--mute:#5f655d;--line:#d5d9d0;--accent:#1c6b57;--accent-ink:#fff;--chip:#e8ebe4;--term:#0f1511;--termink:#c3f0d0;--termdim:#74907f;--err:#ff9d8a;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#121512;--panel:#1b1f1b;--ink:#e5e9e2;--mute:#9aa296;--line:#333a32;--accent:#58c3a2;--accent-ink:#0b1410;--chip:#262c25;--term:#0a0d0a;--termink:#c3f0d0;--termdim:#74907f;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#121512;--panel:#1b1f1b;--ink:#e5e9e2;--mute:#9aa296;--line:#333a32;--accent:#58c3a2;--accent-ink:#0b1410;--chip:#262c25;--term:#0a0d0a;--termink:#c3f0d0;--termdim:#74907f;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+.wrap{max-width:1180px;margin:0 auto;padding-block:24px 40px;padding-inline:16px}
+h1{font-size:22px;margin:0 0 4px}
+.sub{margin:0 0 16px;color:var(--mute);max-width:70ch}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.chip{font:inherit;font-size:14px;padding:5px 12px;border-radius:999px;border:1px solid var(--line);background:var(--chip);color:var(--ink);cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.info{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;margin-bottom:12px;color:var(--mute);font-size:14px}
+.tag{font:12px var(--mono);padding:1px 7px;border:1px solid var(--line);border-radius:4px;color:var(--mute)}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
+select,button.b{font:inherit;padding:7px 12px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--ink);max-width:100%}
+button.run{font:inherit;padding:7px 16px;border-radius:6px;background:var(--accent);color:var(--accent-ink);border:1px solid var(--accent);font-weight:600;cursor:pointer}
+button:disabled{opacity:.55;cursor:default}
+.stat{margin-left:auto;color:var(--mute);font-size:13px;font-variant-numeric:tabular-nums}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+@media (max-width:820px){.grid{grid-template-columns:minmax(0,1fr)}}
+.col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.card h2{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);margin:0;padding:8px 12px;border-bottom:1px solid var(--line);font-weight:600}
+textarea,pre{margin:0;border:0;width:100%;font:13px/1.45 var(--mono);padding:12px;resize:vertical;tab-size:4}
+textarea{background:var(--panel);color:var(--ink);outline:none}
+#src{min-height:340px}
+#inp{min-height:64px;border-top:1px solid var(--line)}
+pre{background:var(--term);color:var(--termink);min-height:340px;max-height:620px;white-space:pre-wrap;overflow:auto;word-break:break-word}
+pre.err{color:var(--err)}
+#draw{padding:10px;background:#fff;display:flex;justify-content:center}
+#draw img{max-width:100%;height:auto;display:block}
+.foot{margin-top:16px;color:var(--mute);font-size:13px;max-width:90ch}
+code{font-family:var(--mono)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+[hidden]{display:none!important}
+</style>
+<div class="wrap">
+  <h1>WASM Playground</h1>
+  <p class="sub">Ten interpreters and compilers, built from C and cREXX, running as WebAssembly in this page. Pick a language, edit the program, press Run. Nothing is sent to a server.</p>
+  <div class="chips" id="chips" role="group" aria-label="Language"></div>
+  <div class="info"><span id="desc"></span><span class="tag" id="kind"></span><span class="tag" id="repo"></span></div>
+  <div class="bar">
+    <label for="sel">Example</label>
+    <select id="sel" aria-label="Example program"></select>
+    <button class="run" id="run" disabled>Loading&hellip;</button>
+    <button class="b" id="stop" hidden>Stop</button>
+    <span class="stat" id="stat" aria-live="polite"></span>
+  </div>
+  <div class="grid">
+    <div class="col">
+      <div class="card">
+        <h2 id="srcl">Program</h2>
+        <textarea id="src" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+        <h2 style="border-top:1px solid var(--line)">Standard input</h2>
+        <textarea id="inp" spellcheck="false" placeholder="Lines read by INPUT, ACCEPT, input() and the like"></textarea>
+      </div>
+    </div>
+    <div class="col">
+      <div class="card">
+        <h2>Output</h2>
+        <pre id="out" aria-live="polite"></pre>
+      </div>
+      <div class="card" id="drawcard" hidden>
+        <h2>Drawing</h2>
+        <div id="draw"></div>
+      </div>
+    </div>
+  </div>
+  <p class="foot">Each run starts a fresh VM on an in-memory file system and runs in a worker, so Stop works. Pascal and PL/M run a compiler, the cREXX assembler and the program as three WASM steps. Press Ctrl+Enter (Cmd+Enter on a Mac) in the editor to run.</p>
+</div>
+<script>
+const SHIM_SRC="(()=>{var H=class p{static read_bytes(t,s){let _=new p;return _.buf=t.getUint32(s,!0),_.buf_len=t.getUint32(s+4,!0),_}static read_bytes_array(t,s,_){let l=[];for(let e=0;e<_;e++)l.push(p.read_bytes(t,s+8*e));return l}},Y=class p{static read_bytes(t,s){let _=new p;return _.buf=t.getUint32(s,!0),_.buf_len=t.getUint32(s+4,!0),_}static read_bytes_array(t,s,_){let l=[];for(let e=0;e<_;e++)l.push(p.read_bytes(t,s+8*e));return l}},et=0,rt=1,v=2;var st=2,T=3,F=4;var m=class{head_length(){return 24}name_length(){return this.dir_name.byteLength}write_head_bytes(t,s){t.setBigUint64(s,this.d_next,!0),t.setBigUint64(s+8,this.d_ino,!0),t.setUint32(s+16,this.dir_name.length,!0),t.setUint8(s+20,this.d_type)}write_name_bytes(t,s,_){t.set(this.dir_name.slice(0,Math.min(this.dir_name.byteLength,_)),s)}constructor(t,s,_,l){let e=new TextEncoder().encode(_);this.d_next=t,this.d_ino=s,this.d_namlen=e.byteLength,this.d_type=l,this.dir_name=e}};var nt=1;var C=class{write_bytes(t,s){t.setUint8(s,this.fs_filetype),t.setUint16(s+2,this.fs_flags,!0),t.setBigUint64(s+8,this.fs_rights_base,!0),t.setBigUint64(s+16,this.fs_rights_inherited,!0)}constructor(t,s){this.fs_rights_base=0n,this.fs_rights_inherited=0n,this.fs_filetype=t,this.fs_flags=s}};var Q=1,P=2,it=4,Z=8,L=class{write_bytes(t,s){t.setBigUint64(s,this.dev,!0),t.setBigUint64(s+8,this.ino,!0),t.setUint8(s+16,this.filetype),t.setBigUint64(s+24,this.nlink,!0),t.setBigUint64(s+32,this.size,!0),t.setBigUint64(s+38,this.atim,!0),t.setBigUint64(s+46,this.mtim,!0),t.setBigUint64(s+52,this.ctim,!0)}constructor(t,s,_){this.dev=0n,this.nlink=0n,this.atim=0n,this.mtim=0n,this.ctim=0n,this.ino=t,this.filetype=s,this.size=_}},ft=0;var Rt=1,z=class p{static read_bytes(t,s){return new p(t.getBigUint64(s,!0),t.getUint8(s+8),t.getUint32(s+16,!0),t.getBigUint64(s+24,!0),t.getUint16(s+36,!0))}constructor(t,s,_,l,e){this.userdata=t,this.eventtype=s,this.clockid=_,this.timeout=l,this.flags=e}},j=class{write_bytes(t,s){t.setBigUint64(s,this.userdata,!0),t.setUint16(s+8,this.error,!0),t.setUint8(s+10,this.eventtype)}constructor(t,s,_){this.userdata=t,this.error=s,this.eventtype=_}};var Nt=0,tt=class{write_bytes(t,s){t.setUint32(s,this.pr_name.byteLength,!0)}constructor(t){this.pr_name=new TextEncoder().encode(t)}},X=class p{static dir(t){let s=new p;return s.tag=Nt,s.inner=new tt(t),s}write_bytes(t,s){t.setUint32(s,this.tag,!0),this.inner.write_bytes(t,s+4)}};var Ot=class{enable(t){this.log=wt(t===void 0?!0:t,this.prefix)}get enabled(){return this.isEnabled}constructor(t){this.isEnabled=t,this.prefix=\"wasi:\",this.enable(t)}};function wt(p,t){return p?console.log.bind(console,\"%c%s\",\"color: #265BA0\",t):()=>{}}var S=new Ot(!1);var V=class extends Error{constructor(t){super(\"exit with exit code \"+t),this.code=t}},at=class{start(t){this.inst=t;try{return t.exports._start(),0}catch(s){if(s instanceof V)return s.code;throw s}}initialize(t){this.inst=t,t.exports._initialize&&t.exports._initialize()}constructor(t,s,_,l={}){this.args=[],this.env=[],this.fds=[],S.enable(l.debug),this.args=t,this.env=s,this.fds=_;let e=this;this.wasiImport={args_sizes_get(r,n){let i=new DataView(e.inst.exports.memory.buffer);i.setUint32(r,e.args.length,!0);let o=0;for(let a of e.args)o+=a.length+1;return i.setUint32(n,o,!0),S.log(i.getUint32(r,!0),i.getUint32(n,!0)),0},args_get(r,n){let i=new DataView(e.inst.exports.memory.buffer),o=new Uint8Array(e.inst.exports.memory.buffer),a=n;for(let f=0;f<e.args.length;f++){i.setUint32(r,n,!0),r+=4;let u=new TextEncoder().encode(e.args[f]);o.set(u,n),i.setUint8(n+u.length,0),n+=u.length+1}return S.enabled&&S.log(new TextDecoder(\"utf-8\").decode(o.slice(a,n))),0},environ_sizes_get(r,n){let i=new DataView(e.inst.exports.memory.buffer);i.setUint32(r,e.env.length,!0);let o=0;for(let a of e.env)o+=new TextEncoder().encode(a).length+1;return i.setUint32(n,o,!0),S.log(i.getUint32(r,!0),i.getUint32(n,!0)),0},environ_get(r,n){let i=new DataView(e.inst.exports.memory.buffer),o=new Uint8Array(e.inst.exports.memory.buffer),a=n;for(let f=0;f<e.env.length;f++){i.setUint32(r,n,!0),r+=4;let u=new TextEncoder().encode(e.env[f]);o.set(u,n),i.setUint8(n+u.length,0),n+=u.length+1}return S.enabled&&S.log(new TextDecoder(\"utf-8\").decode(o.slice(a,n))),0},clock_res_get(r,n){let i;switch(r){case 1:{i=5000n;break}case 0:{i=1000000n;break}default:return 52}return new DataView(e.inst.exports.memory.buffer).setBigUint64(n,i,!0),0},clock_time_get(r,n,i){let o=new DataView(e.inst.exports.memory.buffer);if(r===0)o.setBigUint64(i,BigInt(new Date().getTime())*1000000n,!0);else if(r==1){let a;try{a=BigInt(Math.round(performance.now()*1e6))}catch{a=0n}o.setBigUint64(i,a,!0)}else o.setBigUint64(i,0n,!0);return 0},fd_advise(r,n,i,o){return e.fds[r]!=null?0:8},fd_allocate(r,n,i){return e.fds[r]!=null?e.fds[r].fd_allocate(n,i):8},fd_close(r){if(e.fds[r]!=null){let n=e.fds[r].fd_close();return e.fds[r]=void 0,n}else return 8},fd_datasync(r){return e.fds[r]!=null?e.fds[r].fd_sync():8},fd_fdstat_get(r,n){if(e.fds[r]!=null){let{ret:i,fdstat:o}=e.fds[r].fd_fdstat_get();return o?.write_bytes(new DataView(e.inst.exports.memory.buffer),n),i}else return 8},fd_fdstat_set_flags(r,n){return e.fds[r]!=null?e.fds[r].fd_fdstat_set_flags(n):8},fd_fdstat_set_rights(r,n,i){return e.fds[r]!=null?e.fds[r].fd_fdstat_set_rights(n,i):8},fd_filestat_get(r,n){if(e.fds[r]!=null){let{ret:i,filestat:o}=e.fds[r].fd_filestat_get();return o?.write_bytes(new DataView(e.inst.exports.memory.buffer),n),i}else return 8},fd_filestat_set_size(r,n){return e.fds[r]!=null?e.fds[r].fd_filestat_set_size(n):8},fd_filestat_set_times(r,n,i,o){return e.fds[r]!=null?e.fds[r].fd_filestat_set_times(n,i,o):8},fd_pread(r,n,i,o,a){let f=new DataView(e.inst.exports.memory.buffer),u=new Uint8Array(e.inst.exports.memory.buffer);if(e.fds[r]!=null){let c=H.read_bytes_array(f,n,i),d=0;for(let E of c){let{ret:w,data:h}=e.fds[r].fd_pread(E.buf_len,o);if(w!=0)return f.setUint32(a,d,!0),w;if(u.set(h,E.buf),d+=h.length,o+=BigInt(h.length),h.length!=E.buf_len)break}return f.setUint32(a,d,!0),0}else return 8},fd_prestat_get(r,n){let i=new DataView(e.inst.exports.memory.buffer);if(e.fds[r]!=null){let{ret:o,prestat:a}=e.fds[r].fd_prestat_get();return a?.write_bytes(i,n),o}else return 8},fd_prestat_dir_name(r,n,i){if(e.fds[r]!=null){let{ret:o,prestat:a}=e.fds[r].fd_prestat_get();if(a==null)return o;let f=a.inner.pr_name;return new Uint8Array(e.inst.exports.memory.buffer).set(f.slice(0,i),n),f.byteLength>i?37:0}else return 8},fd_pwrite(r,n,i,o,a){let f=new DataView(e.inst.exports.memory.buffer),u=new Uint8Array(e.inst.exports.memory.buffer);if(e.fds[r]!=null){let c=Y.read_bytes_array(f,n,i),d=0;for(let E of c){let w=u.slice(E.buf,E.buf+E.buf_len),{ret:h,nwritten:b}=e.fds[r].fd_pwrite(w,o);if(h!=0)return f.setUint32(a,d,!0),h;if(d+=b,o+=BigInt(b),b!=w.byteLength)break}return f.setUint32(a,d,!0),0}else return 8},fd_read(r,n,i,o){let a=new DataView(e.inst.exports.memory.buffer),f=new Uint8Array(e.inst.exports.memory.buffer);if(e.fds[r]!=null){let u=H.read_bytes_array(a,n,i),c=0;for(let d of u){let{ret:E,data:w}=e.fds[r].fd_read(d.buf_len);if(E!=0)return a.setUint32(o,c,!0),E;if(f.set(w,d.buf),c+=w.length,w.length!=d.buf_len)break}return a.setUint32(o,c,!0),0}else return 8},fd_readdir(r,n,i,o,a){let f=new DataView(e.inst.exports.memory.buffer),u=new Uint8Array(e.inst.exports.memory.buffer);if(e.fds[r]!=null){let c=0;for(;;){let{ret:d,dirent:E}=e.fds[r].fd_readdir_single(o);if(d!=0)return f.setUint32(a,c,!0),d;if(E==null)break;if(i-c<E.head_length()){c=i;break}let w=new ArrayBuffer(E.head_length());if(E.write_head_bytes(new DataView(w),0),u.set(new Uint8Array(w).slice(0,Math.min(w.byteLength,i-c)),n),n+=E.head_length(),c+=E.head_length(),i-c<E.name_length()){c=i;break}E.write_name_bytes(u,n,i-c),n+=E.name_length(),c+=E.name_length(),o=E.d_next}return f.setUint32(a,c,!0),0}else return 8},fd_renumber(r,n){if(e.fds[r]!=null&&e.fds[n]!=null){let i=e.fds[n].fd_close();return i!=0?i:(e.fds[n]=e.fds[r],e.fds[r]=void 0,0)}else return 8},fd_seek(r,n,i,o){let a=new DataView(e.inst.exports.memory.buffer);if(e.fds[r]!=null){let{ret:f,offset:u}=e.fds[r].fd_seek(n,i);return a.setBigInt64(o,u,!0),f}else return 8},fd_sync(r){return e.fds[r]!=null?e.fds[r].fd_sync():8},fd_tell(r,n){let i=new DataView(e.inst.exports.memory.buffer);if(e.fds[r]!=null){let{ret:o,offset:a}=e.fds[r].fd_tell();return i.setBigUint64(n,a,!0),o}else return 8},fd_write(r,n,i,o){let a=new DataView(e.inst.exports.memory.buffer),f=new Uint8Array(e.inst.exports.memory.buffer);if(e.fds[r]!=null){let u=Y.read_bytes_array(a,n,i),c=0;for(let d of u){let E=f.slice(d.buf,d.buf+d.buf_len),{ret:w,nwritten:h}=e.fds[r].fd_write(E);if(w!=0)return a.setUint32(o,c,!0),w;if(c+=h,h!=E.byteLength)break}return a.setUint32(o,c,!0),0}else return 8},path_create_directory(r,n,i){let o=new Uint8Array(e.inst.exports.memory.buffer);if(e.fds[r]!=null){let a=new TextDecoder(\"utf-8\").decode(o.slice(n,n+i));return e.fds[r].path_create_directory(a)}else return 8},path_filestat_get(r,n,i,o,a){let f=new DataView(e.inst.exports.memory.buffer),u=new Uint8Array(e.inst.exports.memory.buffer);if(e.fds[r]!=null){let c=new TextDecoder(\"utf-8\").decode(u.slice(i,i+o)),{ret:d,filestat:E}=e.fds[r].path_filestat_get(n,c);return E?.write_bytes(f,a),d}else return 8},path_filestat_set_times(r,n,i,o,a,f,u){let c=new Uint8Array(e.inst.exports.memory.buffer);if(e.fds[r]!=null){let d=new TextDecoder(\"utf-8\").decode(c.slice(i,i+o));return e.fds[r].path_filestat_set_times(n,d,a,f,u)}else return 8},path_link(r,n,i,o,a,f,u){let c=new Uint8Array(e.inst.exports.memory.buffer);if(e.fds[r]!=null&&e.fds[a]!=null){let d=new TextDecoder(\"utf-8\").decode(c.slice(i,i+o)),E=new TextDecoder(\"utf-8\").decode(c.slice(f,f+u)),{ret:w,inode_obj:h}=e.fds[r].path_lookup(d,n);return h==null?w:e.fds[a].path_link(E,h,!1)}else return 8},path_open(r,n,i,o,a,f,u,c,d){let E=new DataView(e.inst.exports.memory.buffer),w=new Uint8Array(e.inst.exports.memory.buffer);if(e.fds[r]!=null){let h=new TextDecoder(\"utf-8\").decode(w.slice(i,i+o));S.log(h);let{ret:b,fd_obj:dt}=e.fds[r].path_open(n,h,a,f,u,c);if(b!=0)return b;e.fds.push(dt);let pt=e.fds.length-1;return E.setUint32(d,pt,!0),0}else return 8},path_readlink(r,n,i,o,a,f){let u=new DataView(e.inst.exports.memory.buffer),c=new Uint8Array(e.inst.exports.memory.buffer);if(e.fds[r]!=null){let d=new TextDecoder(\"utf-8\").decode(c.slice(n,n+i));S.log(d);let{ret:E,data:w}=e.fds[r].path_readlink(d);if(w!=null){let h=new TextEncoder().encode(w);if(h.length>a)return u.setUint32(f,0,!0),8;c.set(h,o),u.setUint32(f,h.length,!0)}return E}else return 8},path_remove_directory(r,n,i){let o=new Uint8Array(e.inst.exports.memory.buffer);if(e.fds[r]!=null){let a=new TextDecoder(\"utf-8\").decode(o.slice(n,n+i));return e.fds[r].path_remove_directory(a)}else return 8},path_rename(r,n,i,o,a,f){let u=new Uint8Array(e.inst.exports.memory.buffer);if(e.fds[r]!=null&&e.fds[o]!=null){let c=new TextDecoder(\"utf-8\").decode(u.slice(n,n+i)),d=new TextDecoder(\"utf-8\").decode(u.slice(a,a+f)),{ret:E,inode_obj:w}=e.fds[r].path_unlink(c);if(w==null)return E;if(E=e.fds[o].path_link(d,w,!0),E!=0&&e.fds[r].path_link(c,w,!0)!=0)throw\"path_link should always return success when relinking an inode back to the original place\";return E}else return 8},path_symlink(r,n,i,o,a){let f=new Uint8Array(e.inst.exports.memory.buffer);if(e.fds[i]!=null){let u=new TextDecoder(\"utf-8\").decode(f.slice(r,r+n)),c=new TextDecoder(\"utf-8\").decode(f.slice(o,o+a));return 58}else return 8},path_unlink_file(r,n,i){let o=new Uint8Array(e.inst.exports.memory.buffer);if(e.fds[r]!=null){let a=new TextDecoder(\"utf-8\").decode(o.slice(n,n+i));return e.fds[r].path_unlink_file(a)}else return 8},poll_oneoff(r,n,i){if(i===0)return 28;if(i>1)return S.log(\"poll_oneoff: only a single subscription is supported\"),58;let o=new DataView(e.inst.exports.memory.buffer),a=z.read_bytes(o,r),f=a.eventtype,u=a.clockid,c=a.timeout;if(f!==ft)return S.log(\"poll_oneoff: only clock subscriptions are supported\"),58;let d;if(u===1)d=()=>BigInt(Math.round(performance.now()*1e6));else if(u===0)d=()=>BigInt(new Date().getTime())*1000000n;else return 28;let E=(a.flags&Rt)!==0?c:d()+c;for(;E>d(););return new j(a.userdata,0,f).write_bytes(o,n),0},proc_exit(r){throw new V(r)},proc_raise(r){throw\"raised signal \"+r},sched_yield(){},random_get(r,n){let i=new Uint8Array(e.inst.exports.memory.buffer).subarray(r,r+n);if(\"crypto\"in globalThis&&(typeof SharedArrayBuffer>\"u\"||!(e.inst.exports.memory.buffer instanceof SharedArrayBuffer)))for(let o=0;o<n;o+=65536)crypto.getRandomValues(i.subarray(o,o+65536));else for(let o=0;o<n;o++)i[o]=Math.random()*256|0},sock_recv(r,n,i){throw\"sockets not supported\"},sock_send(r,n,i){throw\"sockets not supported\"},sock_shutdown(r,n){throw\"sockets not supported\"},sock_accept(r,n){throw\"sockets not supported\"}}}};var g=class{fd_allocate(t,s){return 58}fd_close(){return 0}fd_fdstat_get(){return{ret:58,fdstat:null}}fd_fdstat_set_flags(t){return 58}fd_fdstat_set_rights(t,s){return 58}fd_filestat_get(){return{ret:58,filestat:null}}fd_filestat_set_size(t){return 58}fd_filestat_set_times(t,s,_){return 58}fd_pread(t,s){return{ret:58,data:new Uint8Array}}fd_prestat_get(){return{ret:58,prestat:null}}fd_pwrite(t,s){return{ret:58,nwritten:0}}fd_read(t){return{ret:58,data:new Uint8Array}}fd_readdir_single(t){return{ret:58,dirent:null}}fd_seek(t,s){return{ret:58,offset:0n}}fd_sync(){return 0}fd_tell(){return{ret:58,offset:0n}}fd_write(t){return{ret:58,nwritten:0}}path_create_directory(t){return 58}path_filestat_get(t,s){return{ret:58,filestat:null}}path_filestat_set_times(t,s,_,l,e){return 58}path_link(t,s,_){return 58}path_unlink(t){return{ret:58,inode_obj:null}}path_lookup(t,s){return{ret:58,inode_obj:null}}path_open(t,s,_,l,e,r){return{ret:54,fd_obj:null}}path_readlink(t){return{ret:58,data:null}}path_remove_directory(t){return 58}path_rename(t,s,_){return 58}path_unlink_file(t){return 58}},I=class p{static issue_ino(){return p.next_ino++}static root_ino(){return 0n}constructor(){this.ino=p.issue_ino()}};I.next_ino=1n;var G=class extends g{fd_allocate(t,s){if(!(this.file.size>t+s)){let _=new Uint8Array(Number(t+s));_.set(this.file.data,0),this.file.data=_}return 0}fd_fdstat_get(){return{ret:0,fdstat:new C(F,0)}}fd_filestat_set_size(t){if(this.file.size>t)this.file.data=new Uint8Array(this.file.data.buffer.slice(0,Number(t)));else{let s=new Uint8Array(Number(t));s.set(this.file.data,0),this.file.data=s}return 0}fd_read(t){let s=this.file.data.slice(Number(this.file_pos),Number(this.file_pos+BigInt(t)));return this.file_pos+=BigInt(s.length),{ret:0,data:s}}fd_pread(t,s){return{ret:0,data:this.file.data.slice(Number(s),Number(s+BigInt(t)))}}fd_seek(t,s){let _;switch(s){case et:_=t;break;case rt:_=this.file_pos+t;break;case v:_=BigInt(this.file.data.byteLength)+t;break;default:return{ret:28,offset:0n}}return _<0?{ret:28,offset:0n}:(this.file_pos=_,{ret:0,offset:this.file_pos})}fd_tell(){return{ret:0,offset:this.file_pos}}fd_write(t){if(this.file.readonly)return{ret:8,nwritten:0};if(this.file_pos+BigInt(t.byteLength)>this.file.size){let s=this.file.data;this.file.data=new Uint8Array(Number(this.file_pos+BigInt(t.byteLength))),this.file.data.set(s)}return this.file.data.set(t,Number(this.file_pos)),this.file_pos+=BigInt(t.byteLength),{ret:0,nwritten:t.byteLength}}fd_pwrite(t,s){if(this.file.readonly)return{ret:8,nwritten:0};if(s+BigInt(t.byteLength)>this.file.size){let _=this.file.data;this.file.data=new Uint8Array(Number(s+BigInt(t.byteLength))),this.file.data.set(_)}return this.file.data.set(t,Number(s)),{ret:0,nwritten:t.byteLength}}fd_filestat_get(){return{ret:0,filestat:this.file.stat()}}constructor(t){super(),this.file_pos=0n,this.file=t}},k=class extends g{fd_seek(t,s){return{ret:8,offset:0n}}fd_tell(){return{ret:8,offset:0n}}fd_allocate(t,s){return 8}fd_fdstat_get(){return{ret:0,fdstat:new C(T,0)}}fd_readdir_single(t){if(S.enabled&&(S.log(\"readdir_single\",t),S.log(t,this.dir.contents.keys())),t==0n)return{ret:0,dirent:new m(1n,this.dir.ino,\".\",T)};if(t==1n)return{ret:0,dirent:new m(2n,this.dir.parent_ino(),\"..\",T)};if(t>=BigInt(this.dir.contents.size)+2n)return{ret:0,dirent:null};let[s,_]=Array.from(this.dir.contents.entries())[Number(t-2n)];return{ret:0,dirent:new m(t+1n,_.ino,s,_.stat().filetype)}}path_filestat_get(t,s){let{ret:_,path:l}=y.from(s);if(l==null)return{ret:_,filestat:null};let{ret:e,entry:r}=this.dir.get_entry_for_path(l);return r==null?{ret:e,filestat:null}:{ret:0,filestat:r.stat()}}path_lookup(t,s){let{ret:_,path:l}=y.from(t);if(l==null)return{ret:_,inode_obj:null};let{ret:e,entry:r}=this.dir.get_entry_for_path(l);return r==null?{ret:e,inode_obj:null}:{ret:0,inode_obj:r}}path_open(t,s,_,l,e,r){let{ret:n,path:i}=y.from(s);if(i==null)return{ret:n,fd_obj:null};let{ret:o,entry:a}=this.dir.get_entry_for_path(i);if(a==null){if(o!=44)return{ret:o,fd_obj:null};if((_&Q)==Q){let{ret:f,entry:u}=this.dir.create_entry_for_path(s,(_&P)==P);if(u==null)return{ret:f,fd_obj:null};a=u}else return{ret:44,fd_obj:null}}else if((_&it)==it)return{ret:20,fd_obj:null};return(_&P)==P&&a.stat().filetype!==T?{ret:54,fd_obj:null}:a.path_open(_,l,r)}path_create_directory(t){return this.path_open(0,t,Q|P,0n,0n,0).ret}path_link(t,s,_){let{ret:l,path:e}=y.from(t);if(e==null)return l;if(e.is_dir)return 44;let{ret:r,parent_entry:n,filename:i,entry:o}=this.dir.get_parent_dir_and_entry_for_path(e,!0);if(n==null||i==null)return r;if(o!=null){let a=s.stat().filetype==T,f=o.stat().filetype==T;if(a&&f)if(_&&o instanceof D){if(o.contents.size!=0)return 55}else return 20;else{if(a&&!f)return 54;if(!a&&f)return 31;if(!(s.stat().filetype==F&&o.stat().filetype==F))return 20}}return!_&&s.stat().filetype==T?63:(n.contents.set(i,s),0)}path_unlink(t){let{ret:s,path:_}=y.from(t);if(_==null)return{ret:s,inode_obj:null};let{ret:l,parent_entry:e,filename:r,entry:n}=this.dir.get_parent_dir_and_entry_for_path(_,!0);return e==null||r==null?{ret:l,inode_obj:null}:n==null?{ret:44,inode_obj:null}:(e.contents.delete(r),{ret:0,inode_obj:n})}path_unlink_file(t){let{ret:s,path:_}=y.from(t);if(_==null)return s;let{ret:l,parent_entry:e,filename:r,entry:n}=this.dir.get_parent_dir_and_entry_for_path(_,!1);return e==null||r==null||n==null?l:n.stat().filetype===T?31:(e.contents.delete(r),0)}path_remove_directory(t){let{ret:s,path:_}=y.from(t);if(_==null)return s;let{ret:l,parent_entry:e,filename:r,entry:n}=this.dir.get_parent_dir_and_entry_for_path(_,!1);return e==null||r==null||n==null?l:!(n instanceof D)||n.stat().filetype!==T?54:n.contents.size!==0?55:e.contents.delete(r)?0:44}fd_filestat_get(){return{ret:0,filestat:this.dir.stat()}}fd_filestat_set_size(t){return 8}fd_read(t){return{ret:8,data:new Uint8Array}}fd_pread(t,s){return{ret:8,data:new Uint8Array}}fd_write(t){return{ret:8,nwritten:0}}fd_pwrite(t,s){return{ret:8,nwritten:0}}constructor(t){super(),this.dir=t}},W=class extends k{fd_prestat_get(){return{ret:0,prestat:X.dir(this.prestat_name)}}constructor(t,s){super(new D(s)),this.prestat_name=t}},B=class extends I{path_open(t,s,_){if(this.readonly&&(s&BigInt(64))==BigInt(64))return{ret:63,fd_obj:null};if((t&Z)==Z){if(this.readonly)return{ret:63,fd_obj:null};this.data=new Uint8Array([])}let l=new G(this);return _&nt&&l.fd_seek(0n,v),{ret:0,fd_obj:l}}get size(){return BigInt(this.data.byteLength)}stat(){return new L(this.ino,F,this.size)}constructor(t,s){super(),this.data=new Uint8Array(t),this.readonly=!!s?.readonly}},y=class Et{static from(t){let s=new Et;if(s.is_dir=t.endsWith(\"/\"),t.startsWith(\"/\"))return{ret:76,path:null};if(t.includes(\"\\0\"))return{ret:28,path:null};for(let _ of t.split(\"/\"))if(!(_===\"\"||_===\".\")){if(_===\"..\"){if(s.parts.pop()==null)return{ret:76,path:null};continue}s.parts.push(_)}return{ret:0,path:s}}to_path_string(){let t=this.parts.join(\"/\");return this.is_dir&&(t+=\"/\"),t}constructor(){this.parts=[],this.is_dir=!1}},D=class p extends I{parent_ino(){return this.parent==null?I.root_ino():this.parent.ino}path_open(t,s,_){return{ret:0,fd_obj:new k(this)}}stat(){return new L(this.ino,T,0n)}get_entry_for_path(t){let s=this;for(let _ of t.parts){if(!(s instanceof p))return{ret:54,entry:null};let l=s.contents.get(_);if(l!==void 0)s=l;else return S.log(_),{ret:44,entry:null}}return t.is_dir&&s.stat().filetype!=T?{ret:54,entry:null}:{ret:0,entry:s}}get_parent_dir_and_entry_for_path(t,s){let _=t.parts.pop();if(_===void 0)return{ret:28,parent_entry:null,filename:null,entry:null};let{ret:l,entry:e}=this.get_entry_for_path(t);if(e==null)return{ret:l,parent_entry:null,filename:null,entry:null};if(!(e instanceof p))return{ret:54,parent_entry:null,filename:null,entry:null};let r=e.contents.get(_);return r===void 0?s?{ret:0,parent_entry:e,filename:_,entry:null}:{ret:44,parent_entry:null,filename:null,entry:null}:t.is_dir&&r.stat().filetype!=T?{ret:54,parent_entry:null,filename:null,entry:null}:{ret:0,parent_entry:e,filename:_,entry:r}}create_entry_for_path(t,s){let{ret:_,path:l}=y.from(t);if(l==null)return{ret:_,entry:null};let{ret:e,parent_entry:r,filename:n,entry:i}=this.get_parent_dir_and_entry_for_path(l,!0);if(r==null||n==null)return{ret:e,entry:null};if(i!=null)return{ret:20,entry:null};S.log(\"create\",l);let o;return s?o=new p(new Map):o=new B(new ArrayBuffer(0)),r.contents.set(n,o),i=o,{ret:0,entry:i}}constructor(t){super(),this.parent=null,t instanceof Array?this.contents=new Map(t):this.contents=t;for(let s of this.contents.values())s instanceof p&&(s.parent=this)}},K=class p extends g{fd_filestat_get(){return{ret:0,filestat:new L(this.ino,st,BigInt(0))}}fd_fdstat_get(){let t=new C(st,0);return t.fs_rights_base=BigInt(64),{ret:0,fdstat:t}}fd_write(t){return this.write(t),{ret:0,nwritten:t.byteLength}}static lineBuffered(t){let s=new TextDecoder(\"utf-8\",{fatal:!1}),_=\"\";return new p(l=>{_+=s.decode(l,{stream:!0});let e=_.split(`\n`);for(let[r,n]of e.entries())r<e.length-1?t(n):_=n})}constructor(t){super(),this.ino=I.issue_ino(),this.write=t}};globalThis.__wasi={WASI:at,File:B,Directory:D,PreopenDirectory:W,ConsoleStdout:K,OpenFile:G};})();\n";
+const WORKER_BODY=`
+const sjlj=getExports=>{let id=0,ret=0;const H=()=>new Int32Array(getExports().memory.buffer);
+ function save(env,label,table,size){let h=H();id++;h[env>>2]=id;
+  for(let i=0;i<size;i++){if(h[(table>>2)+i*2]===0){h[(table>>2)+i*2]=id;h[(table>>2)+i*2+1]=label;h[(table>>2)+i*2+2]=0;ret=size;return table}}
+  const n=size*2;table=getExports().realloc(table,8*(n+1));h=H();for(let i=size*2;i<n*2+2;i++)h[(table>>2)+i]=0;table=save(env,label,table,n);ret=n;return table}
+ return{saveSetjmp:save,testSetjmp:(i2,table,size)=>{const h=H();for(let i=0;i<size;i++){const c=h[(table>>2)+i*2];if(c===0)break;if(c===i2)return h[(table>>2)+i*2+1]}return 0},getTempRet0:()=>ret}};
+onmessage=e=>{
+ const {steps,files,stdin,result}=e.data;
+ const {WASI,File,Directory,PreopenDirectory,ConsoleStdout,OpenFile,Fd}=globalThis.__wasi;
+ const root=new Map(),enc=new TextEncoder();root.set('tmp',new Directory(new Map()));
+ for(const p in files){const parts=p.split('/');let m=root;
+  for(let i=0;i<parts.length-1;i++){let d=m.get(parts[i]);if(!d){d=new Directory(new Map());m.set(parts[i],d)}m=d.contents}
+  m.set(parts[parts.length-1],new File(files[p]))}
+ const dec=new TextDecoder();
+ const sink=new ConsoleStdout(b=>{postMessage({t:'out',s:dec.decode(b,{stream:true})})});
+ const t0=performance.now();let rc=0,err='';
+ try{
+  for(let i=0;i<steps.length;i++){
+   const st=steps[i];
+   const fds=[new OpenFile(new File(st.stdin?enc.encode(stdin):new Uint8Array(0))),sink,sink,new PreopenDirectory('/',root)];
+   const wasi=new WASI(['prog'].concat(st.args),[],fds);
+   let ex;const inst=new WebAssembly.Instance(st.module,{wasi_snapshot_preview1:wasi.wasiImport,env:sjlj(()=>ex)});ex=inst.exports;
+   rc=wasi.start(inst);
+   if(rc!==0&&i<steps.length-1){err='step '+(i+1)+' of '+steps.length+' failed (exit '+rc+')';break}
+  }
+ }catch(x){err=String(x&&x.message||x)}
+ let res=null;if(result&&root.has(result)){res=root.get(result).data}
+ postMessage({t:'done',rc,err,ms:Math.round(performance.now()-t0),result:res});
+};`;
+const $=id=>document.getElementById(id);
+let M=null,cur=null,worker=null,wurl=null;
+const engines={},blobs={},bundles={};
+async function getBytes(url,gz64){
+  if(blobs[url])return blobs[url];
+  const r=await fetch(url);if(!r.ok)throw new Error('could not load '+url+' ('+r.status+')');
+  if(!gz64)return blobs[url]=new Uint8Array(await r.arrayBuffer());
+  const bin=Uint8Array.from(atob((await r.text()).trim()),c=>c.charCodeAt(0));
+  return blobs[url]=new Uint8Array(await new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+}
+async function getEngine(name){
+  if(!engines[name])engines[name]=WebAssembly.compile(await getBytes(M.engines[name]));
+  return engines[name];
+}
+const enc=new TextEncoder();
+async function collect(lang){
+  const f={};
+  for(const e of lang.files){
+    if(e.bundle){
+      if(!bundles[e.bundle])bundles[e.bundle]=JSON.parse(new TextDecoder().decode(await getBytes(e.bundle)));
+      const b=bundles[e.bundle];for(const k in b)f[e.root+'/'+k]=enc.encode(b[k]);
+    }else f[e.path]=(await getBytes(e.url,e.gz64)).slice();
+  }
+  return f;
+}
+function setOut(t,cls){const o=$('out');o.textContent=t;o.className=cls||''}
+let buf='',raf=0;
+function push(s){buf+=s;if(!raf)raf=requestAnimationFrame(()=>{raf=0;const o=$('out');o.textContent=buf;o.scrollTop=o.scrollHeight})}
+function finish(){$('run').disabled=false;$('run').textContent='Run \u25b6';$('stop').hidden=true;$('sel').disabled=false}
+async function run(){
+  if(!M||$('run').disabled)return;
+  const lang=cur;$('run').disabled=true;$('run').textContent='Running\u2026';$('sel').disabled=true;
+  buf='';setOut('');$('drawcard').hidden=true;$('stat').textContent='loading\u2026';
+  let files,steps;
+  try{
+    files=await collect(lang);
+    steps=[];for(const s of lang.steps)steps.push({module:await getEngine(s.engine),args:s.args,stdin:!!s.stdin});
+  }catch(e){setOut(String(e.message||e),'err');finish();$('stat').textContent='';return}
+  files['prog.'+lang.ext]=enc.encode($('src').value);
+  if(!wurl)wurl=URL.createObjectURL(new Blob([SHIM_SRC+'\n'+WORKER_BODY],{type:'text/javascript'}));
+  worker=new Worker(wurl);
+  $('stop').hidden=false;
+  const t0=performance.now();
+  worker.onmessage=e=>{
+    const m=e.data;
+    if(m.t==='out')push(m.s);
+    else if(m.t==='done'){
+      if(raf){cancelAnimationFrame(raf);raf=0}
+      const o=$('out');o.textContent=buf+(m.err?'\n['+m.err+']':'');o.scrollTop=o.scrollHeight;
+      $('stat').textContent='exit '+m.rc+' \u00b7 '+m.ms+' ms';
+      if(m.result&&m.result.length){
+        let s='';const a=m.result;for(let i=0;i<a.length;i+=8192)s+=String.fromCharCode.apply(null,a.subarray(i,i+8192));
+        $('draw').innerHTML='';const im=new Image();im.alt='Drawing produced by the program';
+        im.src='data:image/svg+xml;base64,'+btoa(s);$('draw').appendChild(im);$('drawcard').hidden=false;
+      }
+      worker.terminate();worker=null;finish();
+    }
+  };
+  worker.onerror=e=>{setOut('worker error: '+e.message,'err');worker=null;finish()};
+  worker.postMessage({steps,files,stdin:$('inp').value,result:lang.result||null});
+}
+$('stop').onclick=()=>{if(worker){worker.terminate();worker=null;push('\n[stopped]');$('stat').textContent='stopped';finish()}};
+$('run').onclick=run;
+function showExample(){
+  const e=cur.examples.find(x=>x.name===$('sel').value);
+  $('src').value=e.src;$('inp').value=e.stdin||'';setOut('');$('stat').textContent='';$('drawcard').hidden=true;
+}
+$('sel').onchange=showExample;
+function pickLang(id,keepHash){
+  cur=M.languages.find(l=>l.id===id)||M.languages[0];
+  for(const c of $('chips').children)c.setAttribute('aria-pressed',c.dataset.id===cur.id);
+  $('desc').textContent=cur.desc;$('kind').textContent=cur.kind;$('repo').textContent='mikebeer/'+cur.repo;
+  $('srcl').textContent='Program (.'+cur.ext+')';
+  const s=$('sel');s.innerHTML='';for(const e of cur.examples){const o=document.createElement('option');o.value=o.textContent=e.name;s.appendChild(o)}
+  s.value=cur.default;showExample();
+  if(!keepHash)try{history.replaceState(null,'','#'+cur.id)}catch(e){}
+}
+$('src').addEventListener('keydown',e=>{
+  if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();run()}
+  else if(e.key==='Tab'&&!e.shiftKey){e.preventDefault();const t=e.target,a=t.selectionStart;t.setRangeText('    ',a,t.selectionEnd,'end')}
+});
+(async()=>{
+  try{
+    M=await (await fetch('languages.json')).json();
+  }catch(e){setOut('could not load languages.json: '+e,'err');return}
+  for(const l of M.languages){const b=document.createElement('button');b.className='chip';b.textContent=l.name;b.dataset.id=l.id;b.setAttribute('aria-pressed','false');b.onclick=()=>pickLang(l.id);$('chips').appendChild(b)}
+  pickLang((location.hash||'').slice(1),true);
+  $('run').disabled=false;$('run').textContent='Run \u25b6';
+  window.addEventListener('hashchange',()=>{if(!worker)pickLang((location.hash||'').slice(1),true)});
+})();
+</script>
+
+</body>
+</html>

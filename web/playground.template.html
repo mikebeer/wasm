@@ -1,0 +1,195 @@
+<title>WASM Playground</title>
+<style>
+/* Layout: language chips, then a toolbar over two panes (program + input | output + drawing). Tokens first. */
+:root{--bg:#f3f4f1;--panel:#fff;--ink:#181a17;--mute:#5f655d;--line:#d5d9d0;--accent:#1c6b57;--accent-ink:#fff;--chip:#e8ebe4;--term:#0f1511;--termink:#c3f0d0;--termdim:#74907f;--err:#ff9d8a;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#121512;--panel:#1b1f1b;--ink:#e5e9e2;--mute:#9aa296;--line:#333a32;--accent:#58c3a2;--accent-ink:#0b1410;--chip:#262c25;--term:#0a0d0a;--termink:#c3f0d0;--termdim:#74907f;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#121512;--panel:#1b1f1b;--ink:#e5e9e2;--mute:#9aa296;--line:#333a32;--accent:#58c3a2;--accent-ink:#0b1410;--chip:#262c25;--term:#0a0d0a;--termink:#c3f0d0;--termdim:#74907f;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+.wrap{max-width:1180px;margin:0 auto;padding-block:24px 40px;padding-inline:16px}
+h1{font-size:22px;margin:0 0 4px}
+.sub{margin:0 0 16px;color:var(--mute);max-width:70ch}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.chip{font:inherit;font-size:14px;padding:5px 12px;border-radius:999px;border:1px solid var(--line);background:var(--chip);color:var(--ink);cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.info{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;margin-bottom:12px;color:var(--mute);font-size:14px}
+.tag{font:12px var(--mono);padding:1px 7px;border:1px solid var(--line);border-radius:4px;color:var(--mute)}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px}
+select,button.b{font:inherit;padding:7px 12px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--ink);max-width:100%}
+button.run{font:inherit;padding:7px 16px;border-radius:6px;background:var(--accent);color:var(--accent-ink);border:1px solid var(--accent);font-weight:600;cursor:pointer}
+button:disabled{opacity:.55;cursor:default}
+.stat{margin-left:auto;color:var(--mute);font-size:13px;font-variant-numeric:tabular-nums}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+@media (max-width:820px){.grid{grid-template-columns:minmax(0,1fr)}}
+.col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.card h2{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);margin:0;padding:8px 12px;border-bottom:1px solid var(--line);font-weight:600}
+textarea,pre{margin:0;border:0;width:100%;font:13px/1.45 var(--mono);padding:12px;resize:vertical;tab-size:4}
+textarea{background:var(--panel);color:var(--ink);outline:none}
+#src{min-height:340px}
+#inp{min-height:64px;border-top:1px solid var(--line)}
+pre{background:var(--term);color:var(--termink);min-height:340px;max-height:620px;white-space:pre-wrap;overflow:auto;word-break:break-word}
+pre.err{color:var(--err)}
+#draw{padding:10px;background:#fff;display:flex;justify-content:center}
+#draw img{max-width:100%;height:auto;display:block}
+.foot{margin-top:16px;color:var(--mute);font-size:13px;max-width:90ch}
+code{font-family:var(--mono)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+[hidden]{display:none!important}
+</style>
+<div class="wrap">
+  <h1>WASM Playground</h1>
+  <p class="sub">Ten interpreters and compilers, built from C and cREXX, running as WebAssembly in this page. Pick a language, edit the program, press Run. Nothing is sent to a server.</p>
+  <div class="chips" id="chips" role="group" aria-label="Language"></div>
+  <div class="info"><span id="desc"></span><span class="tag" id="kind"></span><span class="tag" id="repo"></span></div>
+  <div class="bar">
+    <label for="sel">Example</label>
+    <select id="sel" aria-label="Example program"></select>
+    <button class="run" id="run" disabled>Loading&hellip;</button>
+    <button class="b" id="stop" hidden>Stop</button>
+    <span class="stat" id="stat" aria-live="polite"></span>
+  </div>
+  <div class="grid">
+    <div class="col">
+      <div class="card">
+        <h2 id="srcl">Program</h2>
+        <textarea id="src" spellcheck="false" autocapitalize="off" autocomplete="off"></textarea>
+        <h2 style="border-top:1px solid var(--line)">Standard input</h2>
+        <textarea id="inp" spellcheck="false" placeholder="Lines read by INPUT, ACCEPT, input() and the like"></textarea>
+      </div>
+    </div>
+    <div class="col">
+      <div class="card">
+        <h2>Output</h2>
+        <pre id="out" aria-live="polite"></pre>
+      </div>
+      <div class="card" id="drawcard" hidden>
+        <h2>Drawing</h2>
+        <div id="draw"></div>
+      </div>
+    </div>
+  </div>
+  <p class="foot">Each run starts a fresh VM on an in-memory file system and runs in a worker, so Stop works. Pascal and PL/M run a compiler, the cREXX assembler and the program as three WASM steps. Press Ctrl+Enter (Cmd+Enter on a Mac) in the editor to run.</p>
+</div>
+<script>
+const SHIM_SRC=/*SHIM_JSON*/;
+const WORKER_BODY=`
+const sjlj=getExports=>{let id=0,ret=0;const H=()=>new Int32Array(getExports().memory.buffer);
+ function save(env,label,table,size){let h=H();id++;h[env>>2]=id;
+  for(let i=0;i<size;i++){if(h[(table>>2)+i*2]===0){h[(table>>2)+i*2]=id;h[(table>>2)+i*2+1]=label;h[(table>>2)+i*2+2]=0;ret=size;return table}}
+  const n=size*2;table=getExports().realloc(table,8*(n+1));h=H();for(let i=size*2;i<n*2+2;i++)h[(table>>2)+i]=0;table=save(env,label,table,n);ret=n;return table}
+ return{saveSetjmp:save,testSetjmp:(i2,table,size)=>{const h=H();for(let i=0;i<size;i++){const c=h[(table>>2)+i*2];if(c===0)break;if(c===i2)return h[(table>>2)+i*2+1]}return 0},getTempRet0:()=>ret}};
+onmessage=e=>{
+ const {steps,files,stdin,result}=e.data;
+ const {WASI,File,Directory,PreopenDirectory,ConsoleStdout,OpenFile,Fd}=globalThis.__wasi;
+ const root=new Map(),enc=new TextEncoder();root.set('tmp',new Directory(new Map()));
+ for(const p in files){const parts=p.split('/');let m=root;
+  for(let i=0;i<parts.length-1;i++){let d=m.get(parts[i]);if(!d){d=new Directory(new Map());m.set(parts[i],d)}m=d.contents}
+  m.set(parts[parts.length-1],new File(files[p]))}
+ const dec=new TextDecoder();
+ const sink=new ConsoleStdout(b=>{postMessage({t:'out',s:dec.decode(b,{stream:true})})});
+ const t0=performance.now();let rc=0,err='';
+ try{
+  for(let i=0;i<steps.length;i++){
+   const st=steps[i];
+   const fds=[new OpenFile(new File(st.stdin?enc.encode(stdin):new Uint8Array(0))),sink,sink,new PreopenDirectory('/',root)];
+   const wasi=new WASI(['prog'].concat(st.args),[],fds);
+   let ex;const inst=new WebAssembly.Instance(st.module,{wasi_snapshot_preview1:wasi.wasiImport,env:sjlj(()=>ex)});ex=inst.exports;
+   rc=wasi.start(inst);
+   if(rc!==0&&i<steps.length-1){err='step '+(i+1)+' of '+steps.length+' failed (exit '+rc+')';break}
+  }
+ }catch(x){err=String(x&&x.message||x)}
+ let res=null;if(result&&root.has(result)){res=root.get(result).data}
+ postMessage({t:'done',rc,err,ms:Math.round(performance.now()-t0),result:res});
+};`;
+const $=id=>document.getElementById(id);
+let M=null,cur=null,worker=null,wurl=null;
+const engines={},blobs={},bundles={};
+async function getBytes(url,gz64){
+  if(blobs[url])return blobs[url];
+  const r=await fetch(url);if(!r.ok)throw new Error('could not load '+url+' ('+r.status+')');
+  if(!gz64)return blobs[url]=new Uint8Array(await r.arrayBuffer());
+  const bin=Uint8Array.from(atob((await r.text()).trim()),c=>c.charCodeAt(0));
+  return blobs[url]=new Uint8Array(await new Response(new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+}
+async function getEngine(name){
+  if(!engines[name])engines[name]=WebAssembly.compile(await getBytes(M.engines[name]));
+  return engines[name];
+}
+const enc=new TextEncoder();
+async function collect(lang){
+  const f={};
+  for(const e of lang.files){
+    if(e.bundle){
+      if(!bundles[e.bundle])bundles[e.bundle]=JSON.parse(new TextDecoder().decode(await getBytes(e.bundle)));
+      const b=bundles[e.bundle];for(const k in b)f[e.root+'/'+k]=enc.encode(b[k]);
+    }else f[e.path]=(await getBytes(e.url,e.gz64)).slice();
+  }
+  return f;
+}
+function setOut(t,cls){const o=$('out');o.textContent=t;o.className=cls||''}
+let buf='',raf=0;
+function push(s){buf+=s;if(!raf)raf=requestAnimationFrame(()=>{raf=0;const o=$('out');o.textContent=buf;o.scrollTop=o.scrollHeight})}
+function finish(){$('run').disabled=false;$('run').textContent='Run \u25b6';$('stop').hidden=true;$('sel').disabled=false}
+async function run(){
+  if(!M||$('run').disabled)return;
+  const lang=cur;$('run').disabled=true;$('run').textContent='Running\u2026';$('sel').disabled=true;
+  buf='';setOut('');$('drawcard').hidden=true;$('stat').textContent='loading\u2026';
+  let files,steps;
+  try{
+    files=await collect(lang);
+    steps=[];for(const s of lang.steps)steps.push({module:await getEngine(s.engine),args:s.args,stdin:!!s.stdin});
+  }catch(e){setOut(String(e.message||e),'err');finish();$('stat').textContent='';return}
+  files['prog.'+lang.ext]=enc.encode($('src').value);
+  if(!wurl)wurl=URL.createObjectURL(new Blob([SHIM_SRC+'\n'+WORKER_BODY],{type:'text/javascript'}));
+  worker=new Worker(wurl);
+  $('stop').hidden=false;
+  const t0=performance.now();
+  worker.onmessage=e=>{
+    const m=e.data;
+    if(m.t==='out')push(m.s);
+    else if(m.t==='done'){
+      if(raf){cancelAnimationFrame(raf);raf=0}
+      const o=$('out');o.textContent=buf+(m.err?'\n['+m.err+']':'');o.scrollTop=o.scrollHeight;
+      $('stat').textContent='exit '+m.rc+' \u00b7 '+m.ms+' ms';
+      if(m.result&&m.result.length){
+        let s='';const a=m.result;for(let i=0;i<a.length;i+=8192)s+=String.fromCharCode.apply(null,a.subarray(i,i+8192));
+        $('draw').innerHTML='';const im=new Image();im.alt='Drawing produced by the program';
+        im.src='data:image/svg+xml;base64,'+btoa(s);$('draw').appendChild(im);$('drawcard').hidden=false;
+      }
+      worker.terminate();worker=null;finish();
+    }
+  };
+  worker.onerror=e=>{setOut('worker error: '+e.message,'err');worker=null;finish()};
+  worker.postMessage({steps,files,stdin:$('inp').value,result:lang.result||null});
+}
+$('stop').onclick=()=>{if(worker){worker.terminate();worker=null;push('\n[stopped]');$('stat').textContent='stopped';finish()}};
+$('run').onclick=run;
+function showExample(){
+  const e=cur.examples.find(x=>x.name===$('sel').value);
+  $('src').value=e.src;$('inp').value=e.stdin||'';setOut('');$('stat').textContent='';$('drawcard').hidden=true;
+}
+$('sel').onchange=showExample;
+function pickLang(id,keepHash){
+  cur=M.languages.find(l=>l.id===id)||M.languages[0];
+  for(const c of $('chips').children)c.setAttribute('aria-pressed',c.dataset.id===cur.id);
+  $('desc').textContent=cur.desc;$('kind').textContent=cur.kind;$('repo').textContent='mikebeer/'+cur.repo;
+  $('srcl').textContent='Program (.'+cur.ext+')';
+  const s=$('sel');s.innerHTML='';for(const e of cur.examples){const o=document.createElement('option');o.value=o.textContent=e.name;s.appendChild(o)}
+  s.value=cur.default;showExample();
+  if(!keepHash)try{history.replaceState(null,'','#'+cur.id)}catch(e){}
+}
+$('src').addEventListener('keydown',e=>{
+  if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();run()}
+  else if(e.key==='Tab'&&!e.shiftKey){e.preventDefault();const t=e.target,a=t.selectionStart;t.setRangeText('    ',a,t.selectionEnd,'end')}
+});
+(async()=>{
+  try{
+    M=await (await fetch('languages.json')).json();
+  }catch(e){setOut('could not load languages.json: '+e,'err');return}
+  for(const l of M.languages){const b=document.createElement('button');b.className='chip';b.textContent=l.name;b.dataset.id=l.id;b.setAttribute('aria-pressed','false');b.onclick=()=>pickLang(l.id);$('chips').appendChild(b)}
+  pickLang((location.hash||'').slice(1),true);
+  $('run').disabled=false;$('run').textContent='Run \u25b6';
+  window.addEventListener('hashchange',()=>{if(!worker)pickLang((location.hash||'').slice(1),true)});
+})();
+</script>

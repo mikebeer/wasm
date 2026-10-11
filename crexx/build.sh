@@ -12,5 +12,7 @@ CC="$WASI_SDK/bin/clang --sysroot=$WASI_SDK/share/wasi-sysroot --target=wasm32-w
 # srcs.txt: the sources of the rxbvm target (take them from `make -n -B rxbvm`), paths relative to $S
 sed "s#/home/claude/crexx-src/src#$S#" "$H/srcs.txt" | xargs -P4 -I{} sh -c "$CC -c {} -o $H/obj/\$(basename {} .c).o"
 $CC -c "$H/stubs.c" -o "$H/obj/zstubs.o"
+# rxfloat is a dynamic plugin natively; link it in statically (its constructors register it). BASIC and SNOBOL4 need it.
+$CC -DPLUGIN_ID=rxfloat -I$S/lib/plugins/float -c $S/lib/plugins/float/rxfloat.c -o "$H/obj/rxfloat.o"
 $CC $H/obj/*.o -o "$H/../dist/rxvm.wasm" -lm -Wl,-z,stack-size=8388608 -lwasi-emulated-signal -lwasi-emulated-process-clocks -lwasi-emulated-mman
 ls -la "$H/../dist/rxvm.wasm"

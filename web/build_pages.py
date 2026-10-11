@@ -18,11 +18,11 @@ if which in('apl','all'):
     inputs={'ask':'\'Mike\'\n41\n','guess':'50\n25\n37\n43\n40\n42\n'}
     progs=[{'name':f,'src':open(A+f).read(),'stdin':inputs.get(f[:-4],'')} for f in sorted(os.listdir(A)) if f.endswith('.apl')]
     seed=['v <- iota 12','v times v','reduce plus v','(2 3 rho iota 6) plus 10']
-    make('apl',{'wasm':gz(os.path.join(D,'apl.wasm'))},progs,'const SEED='+json.dumps(seed)+';')
+    make('apl',{'wasm':gz(os.path.join(D,'assets','apl.wasm'))},progs,'const SEED='+json.dumps(seed)+';')
 if which in('xbase','all'):
     X=os.environ.get('XBASE_SRC','/home/claude/xbase')+'/examples/'
     B=os.environ.get('RXBIN_DIR','/tmp/wasi/w')+'/'   # dir with xbase.rxbin, library.rxbin, classlib.rxbin
-    assets={'wasm':gz(os.path.join(D,'rxvm.wasm'))}
+    assets={'wasm':gz(os.path.join(D,'assets','rxvm.wasm'))}
     for m in ['xbase','library','classlib']: assets[m]=gz(B+m+'.rxbin')
     inputs={'guess':'50\n25\n37\n43\n40\n42\n','ask':'Mike\n41\n'}
     order=['hello','primes','bank','addrbook','guess','ask','errors','form']
